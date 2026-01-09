@@ -10,37 +10,19 @@ import { ENEMIES, BOSSES } from './config/enemies';
 import { ITEMS, DROPS } from './config/items';
 import { CHARACTERS } from './config/characters';
 
-// Declare intrinsic elements for TypeScript
+// Fix for JSX Intrinsic Elements in TypeScript
 declare global {
   namespace JSX {
     interface IntrinsicElements {
       mesh: any;
-      planeGeometry: any;
-      boxGeometry: any;
-      meshBasicMaterial: any;
-      meshStandardMaterial: any;
       group: any;
+      boxGeometry: any;
+      planeGeometry: any;
+      meshStandardMaterial: any;
+      meshBasicMaterial: any;
       ambientLight: any;
       directionalLight: any;
       pointLight: any;
-      shadowMaterial: any;
-    }
-  }
-  // Augment React.JSX for setups that look there
-  namespace React {
-    namespace JSX {
-      interface IntrinsicElements {
-        mesh: any;
-        planeGeometry: any;
-        boxGeometry: any;
-        meshBasicMaterial: any;
-        meshStandardMaterial: any;
-        group: any;
-        ambientLight: any;
-        directionalLight: any;
-        pointLight: any;
-        shadowMaterial: any;
-      }
     }
   }
 }
@@ -137,8 +119,11 @@ const EntityMesh: React.FC<{ entity: Entity, engine: GameEngine, assets: AssetLo
             if (spriteName && spriteName !== lastSprite.current) {
                 const tex = assets.getTexture(spriteName);
                 if (tex && meshRef.current.material) {
-                    (meshRef.current.material as THREE.MeshBasicMaterial).map = tex;
-                    (meshRef.current.material as THREE.MeshBasicMaterial).needsUpdate = true;
+                     // Only update map if it's a billboard (MeshBasicMaterial)
+                     if (meshRef.current.material instanceof THREE.MeshBasicMaterial) {
+                        meshRef.current.material.map = tex;
+                        meshRef.current.material.needsUpdate = true;
+                     }
                     lastSprite.current = spriteName;
                 }
             }
@@ -153,13 +138,12 @@ const EntityMesh: React.FC<{ entity: Entity, engine: GameEngine, assets: AssetLo
     const width = entity.w / TILE_SIZE;
     const height = entity.h / TILE_SIZE;
 
-    // Obstacles are 3D Blocks
+    // Obstacles are 3D Blocks - DEBUG: White Color
     if (entity.type === EntityType.OBSTACLE) {
-        const rockTex = assets.getTexture('ROCK');
         return (
              <mesh ref={meshRef} position={[0,0,0]}>
                  <boxGeometry args={[width, height, width]} />
-                 <meshStandardMaterial map={rockTex} color="#888" />
+                 <meshStandardMaterial color="white" />
              </mesh>
         );
     }
@@ -196,11 +180,7 @@ const DungeonMesh: React.FC<{ engine: GameEngine, assets: AssetLoader }> = ({ en
     const room = engine.currentRoom;
     if (!room) return null;
 
-    const wallTex = assets.getTexture('WALL');
     const floorTex = assets.getTexture('FLOOR');
-    const rockTex = assets.getTexture('ROCK');
-
-    const geometryGroups: React.ReactNode[] = [];
 
     // Floor Plane (One big plane for performance if possible, or tiles)
     // We'll use tiles to support the layout logic
@@ -224,18 +204,18 @@ const DungeonMesh: React.FC<{ engine: GameEngine, assets: AssetLoader }> = ({ en
                 </mesh>
             );
 
-            if (tile === 1) { // Wall
+            if (tile === 1) { // Wall - DEBUG: White Color
                 wallMeshes.push(
                     <mesh key={`w-${key}`} position={[x, 0.5, z]}>
                         <boxGeometry args={[1, 1, 1]} />
-                        <meshStandardMaterial map={wallTex} color="#aaa" />
+                        <meshStandardMaterial color="white" />
                     </mesh>
                 );
-            } else if (tile === 2) { // Rock
+            } else if (tile === 2) { // Rock - DEBUG: White Color
                 wallMeshes.push(
                     <mesh key={`r-${key}`} position={[x, 0.5, z]}>
                         <boxGeometry args={[1, 1, 1]} />
-                        <meshStandardMaterial map={rockTex} color="#888" />
+                        <meshStandardMaterial color="white" />
                     </mesh>
                 );
             }

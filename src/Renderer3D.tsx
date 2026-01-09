@@ -11,11 +11,18 @@ import { ITEMS, DROPS } from './config/items';
 import { CHARACTERS } from './config/characters';
 
 // Fix for JSX Intrinsic Elements in TypeScript
-// Using index signature to cover all Three.js elements
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      [elemName: string]: any;
+      mesh: any;
+      group: any;
+      boxGeometry: any;
+      planeGeometry: any;
+      meshStandardMaterial: any;
+      meshBasicMaterial: any;
+      ambientLight: any;
+      directionalLight: any;
+      pointLight: any;
     }
   }
 }
