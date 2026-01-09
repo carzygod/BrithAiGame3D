@@ -14,15 +14,7 @@ import { CHARACTERS } from './config/characters';
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      mesh: any;
-      group: any;
-      boxGeometry: any;
-      planeGeometry: any;
-      meshStandardMaterial: any;
-      meshBasicMaterial: any;
-      ambientLight: any;
-      directionalLight: any;
-      pointLight: any;
+      [elemName: string]: any;
     }
   }
 }
