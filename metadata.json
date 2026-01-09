@@ -1,5 +1,11 @@
 {
   "name": "胎渊-Birth-3D",
   "description": "胎渊3D化",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "dependencies": {
+    "three": "^0.160.0",
+    "@types/three": "^0.160.0",
+    "@react-three/fiber": "^8.15.16",
+    "@react-three/drei": "^9.99.0"
+  }
 }

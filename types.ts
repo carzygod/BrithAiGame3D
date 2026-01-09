@@ -115,6 +115,7 @@ export interface Entity extends Rect {
   color: string;
   markedForDeletion: boolean;
   flashTimer?: number; // Visual: Flash white when hit
+  visualZ?: number; // For 3D floating effects
 }
 
 export interface PlayerEntity extends Entity {

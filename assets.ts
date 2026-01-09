@@ -1,19 +1,23 @@
 
+import * as THREE from 'three';
 import { CONSTANTS } from './constants';
 import { SPRITES } from './sprites';
 
 export type SpriteName = keyof typeof SPRITES;
 
 export class AssetLoader {
-  assets: Record<string, HTMLCanvasElement> = {};
+  // Store Three.js Textures instead of HTMLCanvasElement
+  textures: Record<string, THREE.CanvasTexture> = {};
+  
+  // Keep raw canvases for UI previews if needed, or we can just use the image source of texture
+  rawCanvases: Record<string, HTMLCanvasElement> = {};
 
   constructor() {
     this.generateAssets();
   }
 
   // Draw a 16x16 grid definition onto a canvas of arbitrary size (scaled)
-  // Palettes: [Transparent, Primary, Secondary, Highlight]
-  createTexture(matrix: number[][], palette: string[], size: number): HTMLCanvasElement {
+  createCanvas(matrix: number[][], palette: string[], size: number): HTMLCanvasElement {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
@@ -33,6 +37,15 @@ export class AssetLoader {
       }
     }
     return canvas;
+  }
+  
+  // Convert Canvas to THREE Texture with Pixel settings
+  toTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.magFilter = THREE.NearestFilter; // Critical for Pixel Art look
+      tex.minFilter = THREE.NearestFilter;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
   }
 
   createCircleSprite(radius: number, color: string, core: string): HTMLCanvasElement {
@@ -72,107 +85,109 @@ export class AssetLoader {
   generateAssets() {
     const P = CONSTANTS.PALETTE;
 
+    const register = (name: string, canvas: HTMLCanvasElement) => {
+        this.rawCanvases[name] = canvas;
+        this.textures[name] = this.toTexture(canvas);
+    };
+
     // Walls
-    this.assets['WALL'] = this.createTexture(SPRITES.WALL, 
-      ['', P.WALL_BASE, P.WALL_HIGHLIGHT, P.WALL_SHADOW], CONSTANTS.TILE_SIZE);
+    register('WALL', this.createCanvas(SPRITES.WALL, 
+      ['', P.WALL_BASE, P.WALL_HIGHLIGHT, P.WALL_SHADOW], CONSTANTS.TILE_SIZE));
       
-    // Floor (Low contrast)
-    this.assets['FLOOR'] = this.createTexture(SPRITES.FLOOR,
-      ['', P.FLOOR_BASE, P.FLOOR_VAR_1, P.FLOOR_VAR_2], CONSTANTS.TILE_SIZE);
+    // Floor
+    register('FLOOR', this.createCanvas(SPRITES.FLOOR,
+      ['', P.FLOOR_BASE, P.FLOOR_VAR_1, P.FLOOR_VAR_2], CONSTANTS.TILE_SIZE));
 
     // Obstacles
-    this.assets['ROCK'] = this.createTexture(SPRITES.ROCK,
-      ['', P.ROCK_BASE, P.ROCK_HIGHLIGHT, '#000000'], CONSTANTS.TILE_SIZE);
+    register('ROCK', this.createCanvas(SPRITES.ROCK,
+      ['', P.ROCK_BASE, P.ROCK_HIGHLIGHT, '#000000'], CONSTANTS.TILE_SIZE));
 
     // Player Characters
-    
-    // Alpha (Standard)
-    this.assets['PLAYER'] = this.createTexture(SPRITES.PLAYER,
-      ['', P.PLAYER_MAIN, P.PLAYER_SHADOW, P.PLAYER_SKIN], CONSTANTS.PLAYER_SIZE);
+    register('PLAYER', this.createCanvas(SPRITES.PLAYER,
+      ['', P.PLAYER_MAIN, P.PLAYER_SHADOW, P.PLAYER_SKIN], CONSTANTS.PLAYER_SIZE));
       
-    // Titan (Tank)
-    this.assets['PLAYER_TANK'] = this.createTexture(SPRITES.PLAYER_TANK,
-      ['', '#15803d', '#14532d', '#86efac'], CONSTANTS.PLAYER_SIZE); 
+    register('PLAYER_TANK', this.createCanvas(SPRITES.PLAYER_TANK,
+      ['', '#15803d', '#14532d', '#86efac'], CONSTANTS.PLAYER_SIZE)); 
 
-    // Strider (Rogue - Yellow)
-    this.assets['PLAYER_ROGUE'] = this.createTexture(SPRITES.PLAYER_ROGUE,
-      ['', '#eab308', '#a16207', '#fef08a'], CONSTANTS.PLAYER_SIZE);
+    register('PLAYER_ROGUE', this.createCanvas(SPRITES.PLAYER_ROGUE,
+      ['', '#eab308', '#a16207', '#fef08a'], CONSTANTS.PLAYER_SIZE));
 
-    // Blaster (Mage - Purple)
-    this.assets['PLAYER_MAGE'] = this.createTexture(SPRITES.PLAYER_MAGE,
-      ['', '#a855f7', '#7e22ce', '#e9d5ff'], CONSTANTS.PLAYER_SIZE);
+    register('PLAYER_MAGE', this.createCanvas(SPRITES.PLAYER_MAGE,
+      ['', '#a855f7', '#7e22ce', '#e9d5ff'], CONSTANTS.PLAYER_SIZE));
 
-    // Sniper (Blue - New)
-    this.assets['PLAYER_SNIPER'] = this.createTexture(SPRITES.PLAYER_SNIPER,
-      ['', '#3b82f6', '#1e40af', '#60a5fa'], CONSTANTS.PLAYER_SIZE);
+    register('PLAYER_SNIPER', this.createCanvas(SPRITES.PLAYER_SNIPER,
+      ['', '#3b82f6', '#1e40af', '#60a5fa'], CONSTANTS.PLAYER_SIZE));
 
-    // Swarm (Red - New)
-    this.assets['PLAYER_SWARM'] = this.createTexture(SPRITES.PLAYER_SWARM,
-      ['', '#ef4444', '#991b1b', '#fca5a5'], CONSTANTS.PLAYER_SIZE);
+    register('PLAYER_SWARM', this.createCanvas(SPRITES.PLAYER_SWARM,
+      ['', '#ef4444', '#991b1b', '#fca5a5'], CONSTANTS.PLAYER_SIZE));
 
-    // Void (Black - New)
-    this.assets['PLAYER_VOID'] = this.createTexture(SPRITES.PLAYER_VOID,
-      ['', '#171717', '#0a0a0a', '#404040'], CONSTANTS.PLAYER_SIZE);
+    register('PLAYER_VOID', this.createCanvas(SPRITES.PLAYER_VOID,
+      ['', '#171717', '#0a0a0a', '#404040'], CONSTANTS.PLAYER_SIZE));
 
     // Enemies
-    this.assets['ENEMY_CHASER'] = this.createTexture(SPRITES.ENEMY_CHASER,
-      ['', P.ENEMY_RED_MAIN, P.ENEMY_RED_DARK, '#ffffff'], CONSTANTS.ENEMY_SIZE);
+    register('ENEMY_CHASER', this.createCanvas(SPRITES.ENEMY_CHASER,
+      ['', P.ENEMY_RED_MAIN, P.ENEMY_RED_DARK, '#ffffff'], CONSTANTS.ENEMY_SIZE));
       
-    this.assets['ENEMY_SHOOTER'] = this.createTexture(SPRITES.ENEMY_SHOOTER,
-      ['', P.ENEMY_BLUE_MAIN, P.ENEMY_BLUE_DARK, '#ffffff'], CONSTANTS.ENEMY_SIZE);
+    register('ENEMY_SHOOTER', this.createCanvas(SPRITES.ENEMY_SHOOTER,
+      ['', P.ENEMY_BLUE_MAIN, P.ENEMY_BLUE_DARK, '#ffffff'], CONSTANTS.ENEMY_SIZE));
 
-    this.assets['ENEMY_TANK'] = this.createTexture(SPRITES.ENEMY_TANK,
-      ['', P.ENEMY_GREEN_MAIN, P.ENEMY_GREEN_DARK, '#000000'], CONSTANTS.ENEMY_SIZE * 1.25); // Slightly larger rendered
+    register('ENEMY_TANK', this.createCanvas(SPRITES.ENEMY_TANK,
+      ['', P.ENEMY_GREEN_MAIN, P.ENEMY_GREEN_DARK, '#000000'], CONSTANTS.ENEMY_SIZE * 1.25));
 
-    this.assets['ENEMY_BOSS'] = this.createTexture(SPRITES.BOSS,
-      ['', P.BOSS_MAIN, P.BOSS_HIGHLIGHT, '#000000'], 80); // Boss Size
+    register('ENEMY_BOSS', this.createCanvas(SPRITES.BOSS,
+      ['', P.BOSS_MAIN, P.BOSS_HIGHLIGHT, '#000000'], 80));
 
-    // Items (Generic)
-    this.assets['ITEM'] = this.createTexture(SPRITES.ITEM_BOX,
-      ['', P.ITEM_GOLD, P.ITEM_SHADOW, '#ffffff'], CONSTANTS.ITEM_SIZE);
+    // Items
+    register('ITEM', this.createCanvas(SPRITES.ITEM_BOX,
+      ['', P.ITEM_GOLD, P.ITEM_SHADOW, '#ffffff'], CONSTANTS.ITEM_SIZE));
 
-    // New Items
-    this.assets['ITEM_MEAT'] = this.createTexture(SPRITES.ITEM_MEAT,
-      ['', '#fca5a5', '#dc2626', '#fef2f2'], CONSTANTS.ITEM_SIZE);
+    register('ITEM_MEAT', this.createCanvas(SPRITES.ITEM_MEAT,
+      ['', '#fca5a5', '#dc2626', '#fef2f2'], CONSTANTS.ITEM_SIZE));
       
-    this.assets['ITEM_SWORD'] = this.createTexture(SPRITES.ITEM_SWORD,
-      ['', '#94a3b8', '#475569', '#e2e8f0'], CONSTANTS.ITEM_SIZE);
+    register('ITEM_SWORD', this.createCanvas(SPRITES.ITEM_SWORD,
+      ['', '#94a3b8', '#475569', '#e2e8f0'], CONSTANTS.ITEM_SIZE));
 
-    this.assets['ITEM_SYRINGE'] = this.createTexture(SPRITES.ITEM_SYRINGE,
-      ['', '#e0e7ff', '#ef4444', '#a5f3fc'], CONSTANTS.ITEM_SIZE);
+    register('ITEM_SYRINGE', this.createCanvas(SPRITES.ITEM_SYRINGE,
+      ['', '#e0e7ff', '#ef4444', '#a5f3fc'], CONSTANTS.ITEM_SIZE));
 
-    this.assets['ITEM_MUG'] = this.createTexture(SPRITES.ITEM_MUG,
-      ['', '#78350f', '#92400e', '#451a03'], CONSTANTS.ITEM_SIZE);
+    register('ITEM_MUG', this.createCanvas(SPRITES.ITEM_MUG,
+      ['', '#78350f', '#92400e', '#451a03'], CONSTANTS.ITEM_SIZE));
     
-    this.assets['ITEM_SPRING'] = this.createTexture(SPRITES.ITEM_SPRING,
-      ['', '#9ca3af', '#4b5563', '#d1d5db'], CONSTANTS.ITEM_SIZE);
+    register('ITEM_SPRING', this.createCanvas(SPRITES.ITEM_SPRING,
+      ['', '#9ca3af', '#4b5563', '#d1d5db'], CONSTANTS.ITEM_SIZE));
 
-    this.assets['ITEM_LENS'] = this.createTexture(SPRITES.ITEM_LENS,
-      ['', '#60a5fa', '#1e3a8a', '#93c5fd'], CONSTANTS.ITEM_SIZE);
+    register('ITEM_LENS', this.createCanvas(SPRITES.ITEM_LENS,
+      ['', '#60a5fa', '#1e3a8a', '#93c5fd'], CONSTANTS.ITEM_SIZE));
 
-    this.assets['ITEM_EYE'] = this.createTexture(SPRITES.ITEM_EYE,
-      ['', '#fef3c7', '#d97706', '#000000'], CONSTANTS.ITEM_SIZE);
+    register('ITEM_EYE', this.createCanvas(SPRITES.ITEM_EYE,
+      ['', '#fef3c7', '#d97706', '#000000'], CONSTANTS.ITEM_SIZE));
 
     // Pedestal  
-    this.assets['PEDESTAL'] = this.createTexture(SPRITES.PEDESTAL,
-      ['', P.PEDESTAL_TOP, P.PEDESTAL_SIDE, '#000000'], CONSTANTS.ITEM_SIZE);
+    register('PEDESTAL', this.createCanvas(SPRITES.PEDESTAL,
+      ['', P.PEDESTAL_TOP, P.PEDESTAL_SIDE, '#000000'], CONSTANTS.ITEM_SIZE));
 
-    this.assets['HEART'] = this.createTexture(SPRITES.HEART,
-      ['', P.HEART_MAIN, P.HEART_SHADOW, '#ffffff'], 16);
+    register('HEART', this.createCanvas(SPRITES.HEART,
+      ['', P.HEART_MAIN, P.HEART_SHADOW, '#ffffff'], 16));
       
-    // Projectiles (Procedural circle sprites)
-    this.assets['PROJ_PLAYER'] = this.createCircleSprite(8, P.PROJ_PLAYER_MAIN, P.PROJ_PLAYER_CORE);
-    this.assets['PROJ_ENEMY'] = this.createCircleSprite(8, P.PROJ_ENEMY_MAIN, P.PROJ_ENEMY_CORE);
+    // Projectiles
+    register('PROJ_PLAYER', this.createCircleSprite(8, P.PROJ_PLAYER_MAIN, P.PROJ_PLAYER_CORE));
+    register('PROJ_ENEMY', this.createCircleSprite(8, P.PROJ_ENEMY_MAIN, P.PROJ_ENEMY_CORE));
     
-    // GENERATE FLASH VARIANTS FOR ALL ASSETS
-    // Using Object.keys snapshot to avoid infinite loop while adding keys
-    const currentKeys = Object.keys(this.assets);
+    // GENERATE FLASH VARIANTS
+    const currentKeys = Object.keys(this.rawCanvases);
     for (const key of currentKeys) {
-        this.assets[key + '_FLASH'] = this.createFlashTexture(this.assets[key]);
+        const flashCanvas = this.createFlashTexture(this.rawCanvases[key]);
+        register(key + '_FLASH', flashCanvas);
     }
   }
 
+  // Get raw canvas for UI preview
   get(name: string): HTMLCanvasElement | null {
-    return this.assets[name] || null;
+    return this.rawCanvases[name] || null;
+  }
+
+  // Get Texture for 3D
+  getTexture(name: string): THREE.CanvasTexture | null {
+      return this.textures[name] || null;
   }
 }
