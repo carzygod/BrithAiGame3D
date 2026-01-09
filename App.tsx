@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { GameEngine } from './game';
@@ -118,24 +119,21 @@ const VirtualJoystick: React.FC<JoystickProps> = ({ onMove, color = 'white', lab
     );
 };
 
-const checkIsMobile = () => {
-    if (typeof window === 'undefined') return false;
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+// Helper to format key codes nicely
+const formatKey = (code: string) => {
+    if (code.startsWith('Key')) return code.replace('Key', '');
+    if (code.startsWith('Arrow')) return code.replace('Arrow', '↑'); // Simple arrow representation
+    if (code === 'Space') return 'SPC';
+    if (code === 'Escape') return 'ESC';
+    if (code === 'Enter') return 'ENT';
+    return code;
 };
 
 // Camera Rig to maintain viewing area
 const CameraRig = () => {
     const { camera, size } = useThree();
     useFrame(() => {
-        // We want to see a specific area width in game units.
-        // Room is 15 units wide. Let's show ~18 units for padding.
         const targetWidth = 18;
-        const aspect = size.width / size.height;
-        
-        // Orthographic camera zoom math:
-        // We want 1 World Unit to be roughly X pixels.
-        // X = size.width / targetWidth.
-        
         camera.zoom = size.width / targetWidth;
         camera.updateProjectionMatrix();
     });
@@ -174,6 +172,8 @@ export default function App() {
   const inputRef = useRef<InputManager | null>(null);
   const joystickMoveRef = useRef<Vector2>({ x: 0, y: 0 });
   const joystickShootRef = useRef<Vector2>({ x: 0, y: 0 });
+  
+  // Only load assets once for UI previews
   const uiAssetLoader = useMemo(() => new AssetLoader(), []);
   
   const [displayDims, setDisplayDims] = useState({ width: CONSTANTS.CANVAS_WIDTH, height: CONSTANTS.CANVAS_HEIGHT });
@@ -187,16 +187,19 @@ export default function App() {
   
   const [status, setStatus] = useState<GameStatus>(GameStatus.MENU);
   const [showSettings, setShowSettings] = useState(false);
+  
+  // Key Binding State
   const [waitingForKey, setWaitingForKey] = useState<keyof KeyMap | null>(null);
+  
+  // Navigation State
   const [menuSelection, setMenuSelection] = useState(0); 
   const [selectedCharIndex, setSelectedCharIndex] = useState(0);
-  const [settingsSelection, setSettingsSelection] = useState(0);
 
   const [settings, setSettings] = useState<Settings>({
     language: Language.ZH_CN,
     showMinimap: true,
     isFullScreen: false,
-    enableJoysticks: checkIsMobile(),
+    enableJoysticks: false, // Default: False
     keyMap: { ...DEFAULT_KEYMAP }
   });
 
@@ -204,26 +207,14 @@ export default function App() {
     const handleResize = () => {
         const windowWidth = window.innerWidth;
         const windowHeight = window.innerHeight;
-        // We want to maximize size but keep aspect ratio 15:9 roughly, 
-        // OR just fill screen mostly and let CameraRig handle zoom.
-        // Let's fill 95% of screen but keep a max aspect to avoid being too thin.
         let targetWidth = windowWidth;
-        let targetHeight = windowHeight;
-        
-        // Use a container that respects the game aspect ratio somewhat to avoid UI looking weird?
-        // Actually, for 3D, we can be flexible. Let's just limit max width on desktop.
         if (targetWidth > 1200) targetWidth = 1200;
-        
-        // Aspect ratio for the container
-        const aspect = CONSTANTS.CANVAS_WIDTH / CONSTANTS.CANVAS_HEIGHT; // 1.66
-        targetHeight = targetWidth / aspect;
-        
-        // If height is too tall for screen
+        const aspect = CONSTANTS.CANVAS_WIDTH / CONSTANTS.CANVAS_HEIGHT;
+        let targetHeight = targetWidth / aspect;
         if (targetHeight > windowHeight * 0.9) {
             targetHeight = windowHeight * 0.9;
             targetWidth = targetHeight * aspect;
         }
-
         setDisplayDims({ width: targetWidth, height: targetHeight });
     };
     window.addEventListener('resize', handleResize);
@@ -255,8 +246,10 @@ export default function App() {
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  useEffect(() => { if(showSettings) setSettingsSelection(0); }, [showSettings]);
-  useEffect(() => { if (status === GameStatus.GAME_OVER) setMenuSelection(0); }, [status]);
+  // Reset menu selection when changing major states
+  useEffect(() => { 
+      setMenuSelection(0); 
+  }, [status, showSettings]);
 
   useEffect(() => {
     const handleGlobalKeys = (e: KeyboardEvent) => {
@@ -281,6 +274,7 @@ export default function App() {
 
   useEffect(() => { if (inputRef.current) inputRef.current.updateKeyMap(settings.keyMap); }, [settings.keyMap]);
 
+  // Key Rebinding Listener
   useEffect(() => {
     if (!waitingForKey) return;
     const handleRebind = (e: KeyboardEvent) => {
@@ -309,25 +303,74 @@ export default function App() {
       else if (status === GameStatus.PAUSED) { resumeGame(); }
   };
 
+  // Consolidated Menu Navigation Logic
   useEffect(() => {
-      if (waitingForKey) return;
+      if (waitingForKey) return; // Don't navigate while binding keys
+
       const handleMenuNav = (e: KeyboardEvent) => {
-           if (status === GameStatus.MENU && !showSettings) {
-              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') setMenuSelection(prev => (prev === 0 ? 1 : 0));
-              else if (e.key === 'Enter') { if (menuSelection === 0) setStatus(GameStatus.CHARACTER_SELECT); else setShowSettings(true); }
+           // Prevent default scrolling for arrow keys in menus
+           if (status !== GameStatus.PLAYING) {
+                if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
            }
-           if (status === GameStatus.CHARACTER_SELECT) {
-               if (e.key === 'ArrowLeft') setSelectedCharIndex(p => (p - 1 + CHARACTERS.length) % CHARACTERS.length);
-               if (e.key === 'ArrowRight') setSelectedCharIndex(p => (p + 1) % CHARACTERS.length);
-               if (e.key === 'Enter') startGame();
-               if (e.key === 'Escape') setStatus(GameStatus.MENU);
+
+           const isEnter = e.code === 'Enter' || e.code === 'Space' || e.code === 'NumpadEnter';
+           const isEsc = e.code === 'Escape';
+
+           // 1. MAIN MENU
+           if (status === GameStatus.MENU && !showSettings) {
+              // 2 Items: Start [0], Settings [1]
+              if (e.code === 'ArrowUp') setMenuSelection(prev => (prev - 1 + 2) % 2);
+              if (e.code === 'ArrowDown') setMenuSelection(prev => (prev + 1) % 2);
+              if (isEnter) { 
+                  if (menuSelection === 0) setStatus(GameStatus.CHARACTER_SELECT); 
+                  else setShowSettings(true); 
+              }
+           }
+           
+           // 2. PAUSE MENU
+           else if (status === GameStatus.PAUSED && !showSettings) {
+              // 3 Items: Resume [0], Settings [1], Quit [2]
+              if (e.code === 'ArrowUp') setMenuSelection(prev => (prev - 1 + 3) % 3);
+              if (e.code === 'ArrowDown') setMenuSelection(prev => (prev + 1) % 3);
+              if (isEnter) {
+                   if (menuSelection === 0) resumeGame();
+                   if (menuSelection === 1) setShowSettings(true);
+                   if (menuSelection === 2) returnToMenu();
+              }
+           }
+
+           // 3. GAME OVER
+           else if (status === GameStatus.GAME_OVER) {
+               // 2 Items: Try Again [0], Menu [1]
+               if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+                   setMenuSelection(prev => (prev === 0 ? 1 : 0));
+               }
+               if (isEnter) {
+                   if (menuSelection === 0) startGame();
+                   if (menuSelection === 1) returnToMenu();
+               }
+           }
+
+           // 4. CHARACTER SELECT
+           else if (status === GameStatus.CHARACTER_SELECT) {
+               if (e.code === 'ArrowLeft') setSelectedCharIndex(p => (p - 1 + CHARACTERS.length) % CHARACTERS.length);
+               if (e.code === 'ArrowRight') setSelectedCharIndex(p => (p + 1) % CHARACTERS.length);
+               if (isEnter) startGame();
+               if (isEsc) setStatus(GameStatus.MENU);
            }
       };
       window.addEventListener('keydown', handleMenuNav);
       return () => window.removeEventListener('keydown', handleMenuNav);
-  }, [status, showSettings, menuSelection, settingsSelection, waitingForKey, selectedCharIndex]);
+  }, [status, showSettings, menuSelection, waitingForKey, selectedCharIndex]);
 
   const selectedChar = CHARACTERS[selectedCharIndex];
+
+  // Helper to get button style based on index
+  const getBtnClass = (index: number) => `px-8 py-3 font-bold border-2 transition-all duration-200 transform text-center w-full max-w-xs ${
+      menuSelection === index 
+        ? 'bg-white text-black border-white scale-105' 
+        : 'bg-black/50 text-gray-400 border-gray-700 hover:border-gray-500'
+  }`;
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-neutral-900 text-white font-mono select-none overflow-hidden">
@@ -338,11 +381,10 @@ export default function App() {
             shadows
             dpr={window.devicePixelRatio}
             gl={{ antialias: false, toneMapping: THREE.NoToneMapping }}
-            // Updated camera for Frontal Oblique View
             camera={{ position: [0, 40, 30], zoom: 50, near: 0.1, far: 1000 }}
             onCreated={({ camera, scene }) => {
                 scene.background = new THREE.Color('#111');
-                camera.lookAt(0, 0, 0); // Look at center of room
+                camera.lookAt(0, 0, 0); 
             }}
         >
             <CameraRig />
@@ -388,122 +430,243 @@ export default function App() {
                             const height = maxY - minY + 1;
                             const cellSize = 12;
                             return (
-                                <div className="relative bg-black/50 border border-gray-600 p-1" style={{ width: width * cellSize + 8, height: height * cellSize + 8 }}>
-                                    {gameStats.dungeon.map((room, i) => {
-                                        if (!room.visited) return null;
-                                        const isCurrent = room.x === gameStats.currentRoomPos.x && room.y === gameStats.currentRoomPos.y;
-                                        let bgColor = 'bg-gray-500';
-                                        if (room.type === 'BOSS') bgColor = 'bg-red-900';
-                                        if (room.type === 'ITEM') bgColor = 'bg-yellow-600';
-                                        if (room.type === 'START') bgColor = 'bg-blue-900';
-                                        if (isCurrent) bgColor = 'bg-white animate-pulse';
-                                        return <div key={i} className={`absolute border border-black ${bgColor}`} style={{ width: cellSize, height: cellSize, left: (room.x - minX) * cellSize + 4, top: (room.y - minY) * cellSize + 4 }} />;
-                                    })}
+                                <div className="relative bg-black/60 border border-gray-600 p-1 rounded" style={{width: width*cellSize, height: height*cellSize}}>
+                                    {gameStats.dungeon.map((r, i) => (
+                                        <div key={i} className={`absolute w-2 h-2 rounded-sm ${r.x === gameStats.currentRoomPos.x && r.y === gameStats.currentRoomPos.y ? 'bg-white animate-pulse' : r.visited ? (r.type === 'BOSS' ? 'bg-red-900' : r.type === 'ITEM' ? 'bg-amber-600' : 'bg-gray-400') : 'bg-gray-800'}`}
+                                             style={{left: (r.x - minX)*cellSize, top: (r.y - minY)*cellSize}} />
+                                    ))}
                                 </div>
                             );
                         })()}
                      </div>
                 </div>
-                {gameStats.stats && (
-                    <div className="absolute left-2 top-1/2 transform -translate-y-1/2 flex flex-col gap-2 bg-black/60 p-2 rounded border border-gray-700 backdrop-blur-sm">
-                        <div className="flex items-center gap-2"><span className="text-lg">⚡</span><span className="text-xs font-bold text-yellow-300">{(60 / gameStats.stats.fireRate).toFixed(1)}</span></div>
-                        <div className="flex items-center gap-2"><span className="text-lg">🔭</span><span className="text-xs font-bold text-green-300">{Math.round(gameStats.stats.range)}</span></div>
-                        <div className="flex items-center gap-2"><span className="text-lg">👟</span><span className="text-xs font-bold text-blue-300">{gameStats.stats.speed.toFixed(1)}</span></div>
-                        <div className="flex items-center gap-2"><span className="text-lg">🥊</span><span className="text-xs font-bold text-red-300">{Math.round(gameStats.stats.knockback)}</span></div>
-                        <div className="flex items-center gap-2"><span className="text-lg">🔵</span><span className="text-xs font-bold text-cyan-300">{gameStats.stats.bulletScale.toFixed(1)}</span></div>
+                
+                {/* Mobile Controls Layer (Pointer Events Allowed) */}
+                {settings.enableJoysticks && (
+                    <div className="absolute bottom-8 left-0 w-full flex justify-between px-8 pointer-events-auto">
+                        <VirtualJoystick onMove={(v) => joystickMoveRef.current = v} label="Move" />
+                        <div onClick={toggleMobilePause} className="mb-8 p-2 bg-white/10 rounded-full backdrop-blur-sm border border-white/20">
+                             {status === GameStatus.PAUSED ? <PlayIcon /> : <PauseIcon />}
+                        </div>
+                        <VirtualJoystick onMove={(v) => joystickShootRef.current = v} label="Shoot" color="#ef4444" />
                     </div>
                 )}
+                
+                {/* Boss Bar */}
                 {gameStats.boss && (
-                    <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center justify-center">
-                        <div className="text-red-500 font-bold text-lg mb-1 drop-shadow-md tracking-wider">{gameStats.boss.name}</div>
-                        <div className="w-2/3 h-6 bg-gray-900 border-2 border-red-900 rounded relative overflow-hidden">
-                            <div className="h-full bg-red-600 transition-all duration-200" style={{ width: `${(Math.max(0, gameStats.boss.hp) / gameStats.boss.maxHp) * 100}%` }} />
+                    <div className="absolute bottom-10 left-1/2 transform -translate-x-1/2 w-64 md:w-96">
+                        <div className="text-center text-red-500 font-bold mb-1 text-sm tracking-widest uppercase drop-shadow-md">{gameStats.boss.name}</div>
+                        <div className="h-4 bg-red-900/50 border border-red-900 rounded-sm relative overflow-hidden">
+                            <div className="h-full bg-red-600 transition-all duration-300" style={{ width: `${(gameStats.boss.hp / gameStats.boss.maxHp) * 100}%` }} />
                         </div>
                     </div>
                 )}
+
+                {/* Notifications */}
+                {gameStats.notification && (
+                    <div className="absolute top-32 left-1/2 transform -translate-x-1/2 bg-black/80 border border-white/20 px-6 py-4 rounded text-center backdrop-blur-sm animate-bounce-in">
+                        <div className="text-amber-400 font-bold text-lg mb-1">{t(gameStats.notification.split(':')[0])}</div>
+                        {gameStats.notification.includes(':') && <div className="text-gray-300 text-xs">{t(gameStats.notification.split(':')[1])}</div>}
+                    </div>
+                )}
+
+                {/* Pickup Inspection */}
+                {gameStats.nearbyItem && (
+                     <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 bg-black/90 border border-amber-500/50 px-4 py-2 rounded text-center">
+                         <div className="text-amber-400 font-bold text-sm">{t(gameStats.nearbyItem.name)}</div>
+                         <div className="text-gray-400 text-xs">{t(gameStats.nearbyItem.desc)}</div>
+                     </div>
+                )}
             </div>
         )}
 
-        {/* Menus */}
+        {/* --- SCREENS (Menus) --- */}
+        
+        {/* Main Menu */}
         {status === GameStatus.MENU && !showSettings && (
-          <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center p-8 text-center z-40">
-            <h1 className="text-7xl font-black text-white mb-2 tracking-tighter drop-shadow-lg">{t('GAME_TITLE')}</h1>
-            <p className="text-gray-500 text-sm mb-12 tracking-[0.5em]">3D ISOMETRIC ROGUELIKE</p>
-            <div className="flex flex-col gap-6 w-72 pointer-events-auto">
-              <button onClick={() => setStatus(GameStatus.CHARACTER_SELECT)} className="px-8 py-4 bg-white text-black font-bold text-xl hover:scale-105 transition-transform">{t('START_RUN')}</button>
-              <button onClick={() => setShowSettings(true)} className="px-8 py-3 bg-gray-900 text-gray-500 font-bold border-2 border-gray-800 hover:border-gray-600 transition-colors">{t('SETTINGS')}</button>
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm">
+                <h1 className="text-6xl md:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-b from-cyan-400 to-blue-900 mb-8 tracking-tighter drop-shadow-2xl" style={{fontFamily: 'fantasy'}}>
+                    {t('GAME_TITLE')}
+                </h1>
+                <div className="space-y-4 w-64">
+                    <button 
+                        className={getBtnClass(0)}
+                        onClick={() => setStatus(GameStatus.CHARACTER_SELECT)}
+                        onMouseEnter={() => setMenuSelection(0)}
+                    >
+                        {t('START_RUN')}
+                    </button>
+                    <button 
+                        className={getBtnClass(1)}
+                        onClick={() => setShowSettings(true)}
+                        onMouseEnter={() => setMenuSelection(1)}
+                    >
+                        {t('SETTINGS')}
+                    </button>
+                </div>
+                <div className="absolute bottom-4 text-gray-600 text-xs">v1.2.0 - 3D UPDATE</div>
             </div>
-          </div>
         )}
 
-        {status === GameStatus.CHARACTER_SELECT && !showSettings && (
-             <div className="absolute inset-0 bg-black/95 flex flex-col items-center justify-center z-40 pointer-events-auto">
-                 <h2 className="text-3xl font-bold text-amber-500 mb-8">{t('START_RUN')}</h2>
+        {/* Character Select */}
+        {status === GameStatus.CHARACTER_SELECT && (
+             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md">
+                 <h2 className="text-3xl text-white mb-8 font-bold border-b border-gray-700 pb-2">CHOOSE YOUR VESSEL</h2>
+                 
                  <div className="flex items-center gap-8 mb-8">
-                     <button onClick={() => setSelectedCharIndex(prev => (prev - 1 + CHARACTERS.length) % CHARACTERS.length)} className="text-6xl text-gray-500 hover:text-white">‹</button>
-                     <div className="w-64 bg-gray-800 border-2 border-amber-500 rounded-xl p-6 flex flex-col items-center">
-                         <div className="mb-4 bg-black rounded-full p-4 border-2 border-gray-600">
-                             <SpritePreview spriteName={selectedChar.sprite} assetLoader={uiAssetLoader} />
+                     <button onClick={() => setSelectedCharIndex(p => (p - 1 + CHARACTERS.length) % CHARACTERS.length)} className="text-4xl text-gray-500 hover:text-white transition-colors">‹</button>
+                     
+                     <div className="flex flex-col items-center w-64">
+                         <div className="w-32 h-32 bg-gray-800 rounded-full mb-4 flex items-center justify-center border-4 border-gray-700 shadow-lg relative overflow-hidden">
+                             <div className="transform scale-150">
+                                <SpritePreview spriteName={selectedChar.sprite} assetLoader={uiAssetLoader} />
+                             </div>
                          </div>
-                         <h2 className="text-2xl font-bold text-white">{t(selectedChar.nameKey)}</h2>
-                         <p className="text-xs text-gray-400 mt-2 mb-4 italic text-center min-h-[3em]">"{t(selectedChar.descKey)}"</p>
-                         <div className="w-full flex flex-col gap-1">
-                            <StatBar label={t('STAT_HP')} value={selectedChar.baseStats.maxHp} max={12} color="#ef4444" />
-                            <StatBar label={t('STAT_SPEED')} value={selectedChar.baseStats.speed} max={2.5} color="#3b82f6" />
-                            <StatBar label={t('STAT_DMG')} value={selectedChar.baseStats.damage} max={8} color="#eab308" />
+                         <div className="text-2xl font-bold text-cyan-400 mb-2">{t(selectedChar.nameKey)}</div>
+                         <div className="text-gray-400 text-center text-sm h-12">{t(selectedChar.descKey)}</div>
+                         
+                         <div className="w-full mt-4 space-y-1 bg-gray-800/50 p-4 rounded border border-gray-700">
+                             <StatBar label="HP" value={selectedChar.baseStats.hp} max={10} color="#ef4444" />
+                             <StatBar label="SPD" value={selectedChar.baseStats.speed} max={2.5} color="#3b82f6" />
+                             <StatBar label="DMG" value={selectedChar.baseStats.damage} max={6} color="#ef4444" />
+                             <StatBar label="RNG" value={selectedChar.baseStats.range} max={600} color="#fbbf24" />
                          </div>
                      </div>
-                     <button onClick={() => setSelectedCharIndex(prev => (prev + 1) % CHARACTERS.length)} className="text-6xl text-gray-500 hover:text-white">›</button>
+
+                     <button onClick={() => setSelectedCharIndex(p => (p + 1) % CHARACTERS.length)} className="text-4xl text-gray-500 hover:text-white transition-colors">›</button>
                  </div>
-                 <div className="flex gap-4">
-                     <button onClick={() => setStatus(GameStatus.MENU)} className="px-6 py-2 border border-gray-700 text-gray-500 hover:text-white">BACK</button>
-                     <button onClick={startGame} className="px-10 py-2 bg-amber-600 text-white font-bold hover:bg-amber-500">START</button>
-                 </div>
+
+                 <button 
+                    className="px-12 py-4 bg-white text-black font-bold text-xl hover:scale-105 transition-transform border-4 border-transparent hover:border-cyan-500"
+                    onClick={startGame}
+                 >
+                     BEGIN DESCENT
+                 </button>
+                 <button className="mt-6 text-gray-500 hover:text-white underline text-sm" onClick={() => setStatus(GameStatus.MENU)}>Cancel</button>
              </div>
         )}
 
-        {status === GameStatus.GAME_OVER && (
-          <div className="absolute inset-0 bg-red-950/90 flex flex-col items-center justify-center z-40 pointer-events-auto">
-            <h1 className="text-6xl font-black text-white mb-4">{t('GAME_OVER')}</h1>
-            <div className="flex gap-4">
-                <button onClick={startGame} className="px-8 py-3 bg-red-600 text-white font-bold hover:bg-red-500">{t('TRY_AGAIN')}</button>
-                <button onClick={returnToMenu} className="px-8 py-3 border border-red-800 text-red-200 hover:bg-red-900">{t('RETURN_TO_MENU')}</button>
-            </div>
-          </div>
-        )}
-
+        {/* Pause Menu */}
         {status === GameStatus.PAUSED && !showSettings && (
-           <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-50 pointer-events-auto">
-               <h2 className="text-5xl font-bold text-white mb-8">{t('PAUSE_TITLE')}</h2>
-               <div className="flex flex-col gap-4 w-64">
-                   <button onClick={resumeGame} className="px-6 py-3 bg-white text-black font-bold hover:bg-gray-200">{t('RESUME')}</button>
-                   <button onClick={() => setShowSettings(true)} className="px-6 py-3 border border-gray-600 text-gray-300 hover:bg-gray-800">{t('SETTINGS')}</button>
-                   <button onClick={returnToMenu} className="px-6 py-3 border border-red-900 text-red-300 hover:bg-red-900/50">{t('RETURN_TO_MENU')}</button>
-               </div>
-           </div>
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
+                <h2 className="text-4xl font-bold text-white mb-8 tracking-widest border-b-2 border-white pb-2">{t('PAUSE_TITLE')}</h2>
+                <div className="space-y-4 w-64">
+                    <button className={getBtnClass(0)} onClick={resumeGame} onMouseEnter={() => setMenuSelection(0)}>{t('RESUME')}</button>
+                    <button className={getBtnClass(1)} onClick={() => setShowSettings(true)} onMouseEnter={() => setMenuSelection(1)}>{t('SETTINGS')}</button>
+                    <button className={getBtnClass(2)} onClick={returnToMenu} onMouseEnter={() => setMenuSelection(2)}>{t('RETURN_TO_MENU')}</button>
+                </div>
+                {gameStats && gameStats.stats && (
+                    <div className="mt-8 grid grid-cols-2 gap-4 text-xs text-gray-400 bg-black/80 p-4 rounded border border-gray-700">
+                         <div>DMG: {gameStats.stats.damage.toFixed(1)}</div>
+                         <div>SPD: {gameStats.stats.speed.toFixed(1)}</div>
+                         <div>RATE: {(60/gameStats.stats.fireRate).toFixed(1)}/s</div>
+                         <div>RNG: {gameStats.stats.range.toFixed(0)}</div>
+                    </div>
+                )}
+            </div>
         )}
 
+        {/* Game Over */}
+        {status === GameStatus.GAME_OVER && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-red-900/40 backdrop-blur-md">
+                <h2 className="text-6xl font-black text-red-500 mb-2 drop-shadow-[0_5px_5px_rgba(0,0,0,1)]">{t('GAME_OVER')}</h2>
+                <div className="text-white mb-8 text-xl opacity-80">{t('SCORE')}: {gameStats?.score || 0}</div>
+                <div className="flex gap-4">
+                    <button className={getBtnClass(0)} onClick={startGame} onMouseEnter={() => setMenuSelection(0)}>{t('TRY_AGAIN')}</button>
+                    <button className={getBtnClass(1)} onClick={returnToMenu} onMouseEnter={() => setMenuSelection(1)}>{t('RETURN_TO_MENU')}</button>
+                </div>
+            </div>
+        )}
+
+        {/* Settings Modal */}
         {showSettings && (
-             <div className="absolute inset-0 bg-neutral-900/95 flex flex-col items-center justify-center z-50 pointer-events-auto">
-                 <h2 className="text-3xl font-bold text-amber-500 mb-6">{t('SETTING_TITLE')}</h2>
-                 <div className="w-full max-w-md h-80 overflow-y-auto pr-2 custom-scrollbar border border-gray-800 p-4">
-                     <div className="mb-4"><label className="text-gray-400">{t('SETTING_LANG')}</label><div className="flex gap-2 mt-1">{Object.values(Language).map(l => <button key={l} onClick={()=>setSettings(s=>({...s, language:l}))} className={`px-2 py-1 text-xs border ${settings.language===l?'bg-amber-600':'border-gray-700'}`}>{l}</button>)}</div></div>
-                     <div className="mb-4 flex justify-between"><label>{t('SETTING_MINIMAP')}</label><button onClick={()=>setSettings(s=>({...s, showMinimap:!s.showMinimap}))} className={`w-8 h-4 ${settings.showMinimap?'bg-green-600':'bg-gray-700'}`}></button></div>
-                     <div className="mb-4 flex justify-between"><label>{t('SETTING_JOYSTICKS')}</label><button onClick={()=>setSettings(s=>({...s, enableJoysticks:!s.enableJoysticks}))} className={`w-8 h-4 ${settings.enableJoysticks?'bg-green-600':'bg-gray-700'}`}></button></div>
-                     <button onClick={()=>setShowSettings(false)} className="w-full py-2 bg-white text-black font-bold mt-4">{t('CLOSE')}</button>
-                 </div>
-             </div>
+            <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-md">
+                <div className="bg-neutral-900 border border-gray-600 p-8 w-96 shadow-2xl rounded-sm">
+                    <h2 className="text-2xl font-bold text-white mb-6 border-b border-gray-700 pb-2">{t('SETTING_TITLE')}</h2>
+                    
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                            <span className="text-gray-300">{t('SETTING_LANG')}</span>
+                            <div className="flex gap-2">
+                                {Object.values(Language).map(l => (
+                                    <button 
+                                        key={l}
+                                        className={`px-2 py-1 text-xs border ${settings.language === l ? 'bg-white text-black border-white' : 'bg-transparent text-gray-500 border-gray-700'}`}
+                                        onClick={() => setSettings(s => ({...s, language: l}))}
+                                    >
+                                        {l.split('-')[1] || l.toUpperCase()}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <label className="flex justify-between items-center cursor-pointer">
+                            <span className="text-gray-300">{t('SETTING_MINIMAP')}</span>
+                            <input 
+                                type="checkbox" 
+                                checked={settings.showMinimap}
+                                onChange={e => setSettings(s => ({...s, showMinimap: e.target.checked}))} 
+                                className="accent-cyan-500"
+                            />
+                        </label>
+                        
+                        <label className="flex justify-between items-center cursor-pointer">
+                            <span className="text-gray-300">{t('SETTING_JOYSTICKS')}</span>
+                            <input 
+                                type="checkbox" 
+                                checked={settings.enableJoysticks}
+                                onChange={e => setSettings(s => ({...s, enableJoysticks: e.target.checked}))} 
+                                className="accent-cyan-500"
+                            />
+                        </label>
+
+                        {/* Key Bindings Section */}
+                        <div className="mt-4 border-t border-gray-700 pt-2">
+                            <h3 className="text-amber-500 font-bold mb-2 text-sm">{t('SETTING_KEYS')}</h3>
+                            <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                                {Object.entries(settings.keyMap).map(([action, code]) => (
+                                    <div key={action} className="flex justify-between items-center bg-gray-800 p-2 rounded hover:bg-gray-750">
+                                        <span className="text-xs text-gray-400 uppercase tracking-wider">{t(`KEY_${action.replace(/([A-Z])/g, '_$1').toUpperCase()}`)}</span>
+                                        <button 
+                                            onClick={() => setWaitingForKey(action as keyof KeyMap)}
+                                            className={`text-xs font-bold px-3 py-1 rounded min-w-[60px] text-center transition-all ${
+                                                waitingForKey === action 
+                                                ? 'bg-amber-500 text-black animate-pulse' 
+                                                : 'bg-gray-700 text-white hover:bg-gray-600'
+                                            }`}
+                                        >
+                                            {waitingForKey === action ? '...' : formatKey(code)}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                            {waitingForKey && <div className="text-center text-amber-500 text-xs mt-2 animate-pulse">{t('WAITING_FOR_KEY')}</div>}
+                        </div>
+                    </div>
+
+                    <button 
+                        className="w-full mt-6 py-3 bg-white text-black font-bold hover:bg-gray-200"
+                        onClick={() => setShowSettings(false)}
+                    >
+                        {t('CLOSE')}
+                    </button>
+                </div>
+            </div>
         )}
       </div>
+      
+      {/* Help Text */}
+      <div className="mt-4 text-gray-500 text-xs flex gap-4">
+          <span>{t('RESTART_HINT')}</span>
+          <span>|</span>
+          <span>{t('KEY_TOGGLE_FULLSCREEN')}: {formatKey(settings.keyMap.toggleFullscreen)}</span>
+      </div>
 
-      {/* Joysticks */}
-      {(status === GameStatus.PLAYING || status === GameStatus.PAUSED) && settings.enableJoysticks && (
-          <div className="w-full max-w-[720px] flex justify-center items-center px-4 pb-[5vh] mt-4 gap-8 pointer-events-auto">
-              <div className="flex-1 flex justify-center"><VirtualJoystick label="MOVE" onMove={(v) => joystickMoveRef.current = v} color="#3b82f6" /></div>
-              <button onClick={toggleMobilePause} className="w-16 h-16 rounded-full bg-amber-600/80 border-2 border-amber-400 flex items-center justify-center shadow-lg active:scale-95">{status === GameStatus.PAUSED ? <PlayIcon /> : <PauseIcon />}</button>
-              <div className="flex-1 flex justify-center"><VirtualJoystick label="SHOOT" onMove={(v) => joystickShootRef.current = v} color="#ef4444" /></div>
-          </div>
-      )}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { bg: #222; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { bg: #444; border-radius: 2px; }
+      `}</style>
     </div>
   );
 }

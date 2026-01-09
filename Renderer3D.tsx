@@ -11,15 +11,6 @@ import { ITEMS, DROPS } from './config/items';
 import { CHARACTERS } from './config/characters';
 import { SPRITES } from './sprites';
 
-// Fix for JSX Intrinsic Elements in TypeScript
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      [elemName: string]: any;
-    }
-  }
-}
-
 interface RendererProps {
   engine: GameEngine;
 }

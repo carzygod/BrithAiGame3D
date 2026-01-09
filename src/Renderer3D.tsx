@@ -10,15 +10,6 @@ import { ENEMIES, BOSSES } from './config/enemies';
 import { ITEMS, DROPS } from './config/items';
 import { CHARACTERS } from './config/characters';
 
-// Fix for JSX Intrinsic Elements in TypeScript
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      [elemName: string]: any;
-    }
-  }
-}
-
 interface RendererProps {
   engine: GameEngine;
 }
@@ -166,7 +157,7 @@ const EntityMesh: React.FC<{ entity: Entity, engine: GameEngine, assets: AssetLo
 });
 
 // The Static Environment
-const DungeonMesh: React.FC<{ engine: GameEngine, assets: AssetLoader }> = ({ engine, assets }) => {
+const DungeonMesh: React.FC<{ engine: GameEngine, assets: AssetLoader }> = React.memo(({ engine, assets }) => {
     const room = engine.currentRoom;
     if (!room) return null;
 
@@ -192,7 +183,7 @@ const DungeonMesh: React.FC<{ engine: GameEngine, assets: AssetLoader }> = ({ en
 
             // Floor is everywhere inside bounds
             floorMeshes.push(
-                <mesh key={`f-${key}`} position={[x, 0, z]} rotation={[-Math.PI/2, 0, 0]}>
+                <mesh key={`f-${key}`} position={[x, 0, z]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
                     <planeGeometry args={[1, 1]} />
                     <meshStandardMaterial map={floorTex} color={tile === 3 ? "#2d3748" : "#666"} />
                 </mesh>
@@ -200,16 +191,16 @@ const DungeonMesh: React.FC<{ engine: GameEngine, assets: AssetLoader }> = ({ en
 
             if (tile === 1) { // Wall
                 wallMeshes.push(
-                    <mesh key={`w-${key}`} position={[x, 0.5, z]}>
+                    <mesh key={`w-${key}`} position={[x, 0.5, z]} castShadow receiveShadow>
                         <boxGeometry args={[1, 1, 1]} />
-                        <meshStandardMaterial map={wallTex} color="#aaa" />
+                        <meshStandardMaterial color="white" />
                     </mesh>
                 );
             } else if (tile === 2) { // Rock
                 wallMeshes.push(
-                    <mesh key={`r-${key}`} position={[x, 0.5, z]}>
+                    <mesh key={`r-${key}`} position={[x, 0.5, z]} castShadow receiveShadow>
                         <boxGeometry args={[1, 1, 1]} />
-                        <meshStandardMaterial map={rockTex} color="#888" />
+                        <meshStandardMaterial color="white" />
                     </mesh>
                 );
             }
@@ -219,7 +210,7 @@ const DungeonMesh: React.FC<{ engine: GameEngine, assets: AssetLoader }> = ({ en
     // Doors (Visual Gates)
     if (!room.cleared) {
         const createGate = (x: number, z: number, rotY: number, key: string) => (
-            <mesh key={key} position={[x, 0.75, z]} rotation={[0, rotY, 0]}>
+            <mesh key={key} position={[x, 0.75, z]} rotation={[0, rotY, 0]} castShadow>
                 <boxGeometry args={[1, 1.5, 0.2]} />
                 <meshStandardMaterial color="#3f2e18" />
             </mesh>
@@ -242,7 +233,7 @@ const DungeonMesh: React.FC<{ engine: GameEngine, assets: AssetLoader }> = ({ en
             </mesh>
         </group>
     );
-};
+});
 
 export const GameScene: React.FC<RendererProps> = ({ engine }) => {
     const { camera } = useThree();
