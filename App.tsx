@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { GameEngine } from './game';
@@ -172,6 +171,7 @@ export default function App() {
   const inputRef = useRef<InputManager | null>(null);
   const joystickMoveRef = useRef<Vector2>({ x: 0, y: 0 });
   const joystickShootRef = useRef<Vector2>({ x: 0, y: 0 });
+  const keyListRef = useRef<HTMLDivElement>(null);
   
   // Only load assets once for UI previews
   const uiAssetLoader = useMemo(() => new AssetLoader(), []);
@@ -183,6 +183,7 @@ export default function App() {
     dungeon: {x:number, y:number, type: string, visited: boolean}[];
     currentRoomPos: {x:number, y:number};
     stats?: Stats; nearbyItem?: any; boss?: any;
+    restartTimer?: number;
   } | null>(null);
   
   const [status, setStatus] = useState<GameStatus>(GameStatus.MENU);
@@ -193,6 +194,7 @@ export default function App() {
   
   // Navigation State
   const [menuSelection, setMenuSelection] = useState(0); 
+  const [settingsSelection, setSettingsSelection] = useState(0);
   const [selectedCharIndex, setSelectedCharIndex] = useState(0);
 
   const [settings, setSettings] = useState<Settings>({
@@ -249,7 +251,22 @@ export default function App() {
   // Reset menu selection when changing major states
   useEffect(() => { 
       setMenuSelection(0); 
+      setSettingsSelection(0);
   }, [status, showSettings]);
+  
+  // Scroll to key binding
+  useEffect(() => {
+      if (showSettings && keyListRef.current) {
+          const keyList = Object.keys(settings.keyMap);
+          if (settingsSelection >= 3 && settingsSelection < 3 + keyList.length) {
+              const index = settingsSelection - 3;
+              const el = keyListRef.current.children[index] as HTMLElement;
+              if (el) {
+                  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+              }
+          }
+      }
+  }, [settingsSelection, showSettings, settings.keyMap]);
 
   useEffect(() => {
     const handleGlobalKeys = (e: KeyboardEvent) => {
@@ -316,8 +333,42 @@ export default function App() {
            const isEnter = e.code === 'Enter' || e.code === 'Space' || e.code === 'NumpadEnter';
            const isEsc = e.code === 'Escape';
 
+           // SETTINGS MENU NAVIGATION
+           if (showSettings) {
+               const keyList = Object.keys(settings.keyMap);
+               const totalSettings = 3 + keyList.length + 1; // Lang, Map, Joy, Keys..., Close
+
+               if (e.code === 'ArrowUp') setSettingsSelection(p => (p - 1 + totalSettings) % totalSettings);
+               if (e.code === 'ArrowDown') setSettingsSelection(p => (p + 1) % totalSettings);
+
+               // Language Cycle
+               if (settingsSelection === 0 && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+                   const langs = Object.values(Language);
+                   const idx = langs.indexOf(settings.language);
+                   const dir = e.code === 'ArrowLeft' ? -1 : 1;
+                   setSettings(s => ({...s, language: langs[(idx + dir + langs.length) % langs.length]}));
+               }
+               
+               if (isEnter) {
+                   if (settingsSelection === 0) {
+                        const langs = Object.values(Language);
+                        const idx = langs.indexOf(settings.language);
+                        setSettings(s => ({...s, language: langs[(idx + 1) % langs.length]}));
+                   }
+                   else if (settingsSelection === 1) setSettings(s => ({...s, showMinimap: !s.showMinimap}));
+                   else if (settingsSelection === 2) setSettings(s => ({...s, enableJoysticks: !s.enableJoysticks}));
+                   else if (settingsSelection >= 3 && settingsSelection < 3 + keyList.length) {
+                        setWaitingForKey(keyList[settingsSelection - 3] as keyof KeyMap);
+                   }
+                   else if (settingsSelection === totalSettings - 1) setShowSettings(false);
+               }
+               
+               if (isEsc) setShowSettings(false);
+               return; // Skip other menu logic
+           }
+
            // 1. MAIN MENU
-           if (status === GameStatus.MENU && !showSettings) {
+           if (status === GameStatus.MENU) {
               // 2 Items: Start [0], Settings [1]
               if (e.code === 'ArrowUp') setMenuSelection(prev => (prev - 1 + 2) % 2);
               if (e.code === 'ArrowDown') setMenuSelection(prev => (prev + 1) % 2);
@@ -328,23 +379,23 @@ export default function App() {
            }
            
            // 2. PAUSE MENU
-           else if (status === GameStatus.PAUSED && !showSettings) {
-              // 3 Items: Resume [0], Settings [1], Quit [2]
-              if (e.code === 'ArrowUp') setMenuSelection(prev => (prev - 1 + 3) % 3);
-              if (e.code === 'ArrowDown') setMenuSelection(prev => (prev + 1) % 3);
+           else if (status === GameStatus.PAUSED) {
+              // 4 Items: Resume [0], Settings [1], Copy Seed [2], Quit [3]
+              if (e.code === 'ArrowUp') setMenuSelection(prev => (prev - 1 + 4) % 4);
+              if (e.code === 'ArrowDown') setMenuSelection(prev => (prev + 1) % 4);
               if (isEnter) {
                    if (menuSelection === 0) resumeGame();
                    if (menuSelection === 1) setShowSettings(true);
-                   if (menuSelection === 2) returnToMenu();
+                   if (menuSelection === 2 && gameStats) navigator.clipboard.writeText(gameStats.seed.toString());
+                   if (menuSelection === 3) returnToMenu();
               }
            }
 
            // 3. GAME OVER
            else if (status === GameStatus.GAME_OVER) {
                // 2 Items: Try Again [0], Menu [1]
-               if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
-                   setMenuSelection(prev => (prev === 0 ? 1 : 0));
-               }
+               if (e.code === 'ArrowUp') setMenuSelection(prev => (prev - 1 + 2) % 2);
+               if (e.code === 'ArrowDown') setMenuSelection(prev => (prev + 1) % 2);
                if (isEnter) {
                    if (menuSelection === 0) startGame();
                    if (menuSelection === 1) returnToMenu();
@@ -361,7 +412,7 @@ export default function App() {
       };
       window.addEventListener('keydown', handleMenuNav);
       return () => window.removeEventListener('keydown', handleMenuNav);
-  }, [status, showSettings, menuSelection, waitingForKey, selectedCharIndex]);
+  }, [status, showSettings, menuSelection, waitingForKey, selectedCharIndex, settingsSelection, settings, gameStats]);
 
   const selectedChar = CHARACTERS[selectedCharIndex];
 
@@ -441,6 +492,16 @@ export default function App() {
                      </div>
                 </div>
                 
+                {/* RESTART PROGRESS BAR */}
+                {gameStats.restartTimer !== undefined && gameStats.restartTimer > 0 && (
+                    <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center">
+                        <div className="text-white text-xs mb-1 font-bold tracking-widest bg-black/50 px-2 rounded">{t('HOLD_R')}</div>
+                        <div className="w-32 h-2 bg-gray-800 rounded-full overflow-hidden border border-gray-600">
+                             <div className="h-full bg-red-500 transition-all duration-75" style={{width: `${(gameStats.restartTimer / 60) * 100}%`}} />
+                        </div>
+                    </div>
+                )}
+                
                 {/* Mobile Controls Layer (Pointer Events Allowed) */}
                 {settings.enableJoysticks && (
                     <div className="absolute bottom-8 left-0 w-full flex justify-between px-8 pointer-events-auto">
@@ -464,17 +525,17 @@ export default function App() {
 
                 {/* Notifications */}
                 {gameStats.notification && (
-                    <div className="absolute top-32 left-1/2 transform -translate-x-1/2 bg-black/80 border border-white/20 px-6 py-4 rounded text-center backdrop-blur-sm animate-bounce-in">
+                    <div className="absolute top-32 left-1/2 transform -translate-x-1/2 bg-black/80 border border-white/20 px-6 py-4 rounded text-center backdrop-blur-sm animate-bounce-in z-50">
                         <div className="text-amber-400 font-bold text-lg mb-1">{t(gameStats.notification.split(':')[0])}</div>
-                        {gameStats.notification.includes(':') && <div className="text-gray-300 text-xs">{t(gameStats.notification.split(':')[1])}</div>}
+                        {gameStats.notification.includes(':') && <div className="text-gray-300 text-xs">{t(gameStats.notification.split(':')[1] || '')}</div>}
                     </div>
                 )}
 
                 {/* Pickup Inspection */}
                 {gameStats.nearbyItem && (
-                     <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 bg-black/90 border border-amber-500/50 px-4 py-2 rounded text-center">
-                         <div className="text-amber-400 font-bold text-sm">{t(gameStats.nearbyItem.name)}</div>
-                         <div className="text-gray-400 text-xs">{t(gameStats.nearbyItem.desc)}</div>
+                     <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 bg-black/95 border border-amber-500 px-6 py-3 rounded text-center z-50 shadow-lg">
+                         <div className="text-amber-400 font-bold text-base mb-1">{t(String(gameStats.nearbyItem.name))}</div>
+                         <div className="text-gray-300 text-xs">{t(String(gameStats.nearbyItem.desc))}</div>
                      </div>
                 )}
             </div>
@@ -553,8 +614,12 @@ export default function App() {
                 <div className="space-y-4 w-64">
                     <button className={getBtnClass(0)} onClick={resumeGame} onMouseEnter={() => setMenuSelection(0)}>{t('RESUME')}</button>
                     <button className={getBtnClass(1)} onClick={() => setShowSettings(true)} onMouseEnter={() => setMenuSelection(1)}>{t('SETTINGS')}</button>
-                    <button className={getBtnClass(2)} onClick={returnToMenu} onMouseEnter={() => setMenuSelection(2)}>{t('RETURN_TO_MENU')}</button>
+                    <button className={getBtnClass(2)} onClick={() => gameStats && navigator.clipboard.writeText(gameStats.seed.toString())} onMouseEnter={() => setMenuSelection(2)}>{t('COPY_SEED')}</button>
+                    <button className={getBtnClass(3)} onClick={returnToMenu} onMouseEnter={() => setMenuSelection(3)}>{t('RETURN_TO_MENU')}</button>
                 </div>
+                {gameStats && gameStats.seed && (
+                    <div className="mt-2 text-xs text-gray-500 font-mono">SEED: {gameStats.seed}</div>
+                )}
                 {gameStats && gameStats.stats && (
                     <div className="mt-8 grid grid-cols-2 gap-4 text-xs text-gray-400 bg-black/80 p-4 rounded border border-gray-700">
                          <div>DMG: {gameStats.stats.damage.toFixed(1)}</div>
@@ -571,7 +636,7 @@ export default function App() {
             <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-red-900/40 backdrop-blur-md">
                 <h2 className="text-6xl font-black text-red-500 mb-2 drop-shadow-[0_5px_5px_rgba(0,0,0,1)]">{t('GAME_OVER')}</h2>
                 <div className="text-white mb-8 text-xl opacity-80">{t('SCORE')}: {gameStats?.score || 0}</div>
-                <div className="flex gap-4">
+                <div className="flex flex-col gap-4 w-64">
                     <button className={getBtnClass(0)} onClick={startGame} onMouseEnter={() => setMenuSelection(0)}>{t('TRY_AGAIN')}</button>
                     <button className={getBtnClass(1)} onClick={returnToMenu} onMouseEnter={() => setMenuSelection(1)}>{t('RETURN_TO_MENU')}</button>
                 </div>
@@ -585,7 +650,9 @@ export default function App() {
                     <h2 className="text-2xl font-bold text-white mb-6 border-b border-gray-700 pb-2">{t('SETTING_TITLE')}</h2>
                     
                     <div className="space-y-4">
-                        <div className="flex justify-between items-center">
+                        {/* 0: Language */}
+                        <div className={`flex justify-between items-center p-2 rounded ${settingsSelection === 0 ? 'bg-white/10 border border-white/30' : ''}`}
+                             onMouseEnter={() => setSettingsSelection(0)}>
                             <span className="text-gray-300">{t('SETTING_LANG')}</span>
                             <div className="flex gap-2">
                                 {Object.values(Language).map(l => (
@@ -600,7 +667,9 @@ export default function App() {
                             </div>
                         </div>
 
-                        <label className="flex justify-between items-center cursor-pointer">
+                        {/* 1: Minimap */}
+                        <label className={`flex justify-between items-center cursor-pointer p-2 rounded ${settingsSelection === 1 ? 'bg-white/10 border border-white/30' : ''}`}
+                               onMouseEnter={() => setSettingsSelection(1)}>
                             <span className="text-gray-300">{t('SETTING_MINIMAP')}</span>
                             <input 
                                 type="checkbox" 
@@ -610,63 +679,13 @@ export default function App() {
                             />
                         </label>
                         
-                        <label className="flex justify-between items-center cursor-pointer">
+                        {/* 2: Joysticks */}
+                        <label className={`flex justify-between items-center cursor-pointer p-2 rounded ${settingsSelection === 2 ? 'bg-white/10 border border-white/30' : ''}`}
+                               onMouseEnter={() => setSettingsSelection(2)}>
                             <span className="text-gray-300">{t('SETTING_JOYSTICKS')}</span>
                             <input 
                                 type="checkbox" 
                                 checked={settings.enableJoysticks}
                                 onChange={e => setSettings(s => ({...s, enableJoysticks: e.target.checked}))} 
                                 className="accent-cyan-500"
-                            />
-                        </label>
-
-                        {/* Key Bindings Section */}
-                        <div className="mt-4 border-t border-gray-700 pt-2">
-                            <h3 className="text-amber-500 font-bold mb-2 text-sm">{t('SETTING_KEYS')}</h3>
-                            <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                                {Object.entries(settings.keyMap).map(([action, code]) => (
-                                    <div key={action} className="flex justify-between items-center bg-gray-800 p-2 rounded hover:bg-gray-750">
-                                        <span className="text-xs text-gray-400 uppercase tracking-wider">{t(`KEY_${action.replace(/([A-Z])/g, '_$1').toUpperCase()}`)}</span>
-                                        <button 
-                                            onClick={() => setWaitingForKey(action as keyof KeyMap)}
-                                            className={`text-xs font-bold px-3 py-1 rounded min-w-[60px] text-center transition-all ${
-                                                waitingForKey === action 
-                                                ? 'bg-amber-500 text-black animate-pulse' 
-                                                : 'bg-gray-700 text-white hover:bg-gray-600'
-                                            }`}
-                                        >
-                                            {waitingForKey === action ? '...' : formatKey(code)}
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                            {waitingForKey && <div className="text-center text-amber-500 text-xs mt-2 animate-pulse">{t('WAITING_FOR_KEY')}</div>}
-                        </div>
-                    </div>
-
-                    <button 
-                        className="w-full mt-6 py-3 bg-white text-black font-bold hover:bg-gray-200"
-                        onClick={() => setShowSettings(false)}
-                    >
-                        {t('CLOSE')}
-                    </button>
-                </div>
-            </div>
-        )}
-      </div>
-      
-      {/* Help Text */}
-      <div className="mt-4 text-gray-500 text-xs flex gap-4">
-          <span>{t('RESTART_HINT')}</span>
-          <span>|</span>
-          <span>{t('KEY_TOGGLE_FULLSCREEN')}: {formatKey(settings.keyMap.toggleFullscreen)}</span>
-      </div>
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { bg: #222; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { bg: #444; border-radius: 2px; }
-      `}</style>
-    </div>
-  );
-}
+                            

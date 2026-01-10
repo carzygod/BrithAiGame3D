@@ -61,7 +61,7 @@ export class GameEngine {
     this.characterId = characterId;
     this.floorLevel = 1;
     this.score = 0;
-    this.baseSeed = Date.now(); // Initial random seed for the run
+    this.baseSeed = Math.floor(Math.random() * 1000000); // Initial random seed for the run
     this.player = this.createPlayer(characterId);
     this.loadFloor(1);
     this.status = GameStatus.PLAYING;
@@ -214,6 +214,18 @@ export class GameEngine {
         // Spawn normal enemies
         else if (room.type === 'NORMAL') {
              this.spawnEnemiesForRoom(room);
+        }
+    }
+
+    // BUG FIX: Check if room is empty (no enemies spawned) immediately.
+    // This fixes Item rooms (0 enemies) and rare empty Normal rooms.
+    // If we don't do this, the door stays locked until update() loop runs,
+    // which might cause a frame of "locked" state or glitch if not handled.
+    if (!room.cleared) {
+        const enemies = this.entities.filter(e => e.type === EntityType.ENEMY);
+        if (enemies.length === 0) {
+            room.cleared = true;
+            carveDoors(room.layout, room.doors);
         }
     }
 
@@ -403,7 +415,7 @@ export class GameEngine {
       let bossData = null;
 
       if (this.currentRoom) {
-          let closestDist = 80; // Inspection Radius
+          let closestDist = 120; // Increased Inspection Radius from 80 to 120
           const cx = this.player.x + this.player.w/2;
           const cy = this.player.y + this.player.h/2;
           
@@ -446,7 +458,8 @@ export class GameEngine {
           currentRoomPos: this.currentRoom ? {x: this.currentRoom.x, y: this.currentRoom.y} : {x:0, y:0},
           stats: this.player.stats,
           nearbyItem,
-          boss: bossData
+          boss: bossData,
+          restartTimer: this.restartTimer
       };
   }
 
@@ -516,10 +529,13 @@ export class GameEngine {
     const enemies = this.entities.filter(e => e.type === EntityType.ENEMY) as EnemyEntity[];
     const roomIsClear = enemies.length === 0;
 
-    if (this.currentRoom && !this.currentRoom.cleared && roomIsClear && this.currentRoom.type !== 'ITEM') {
+    // Fixed logic to ensure rooms clear when last enemy dies
+    // Also covers cases where room has 0 enemies initially (if enterRoom didn't catch it)
+    if (this.currentRoom && !this.currentRoom.cleared && roomIsClear) {
         this.currentRoom.cleared = true;
         carveDoors(this.currentRoom.layout, this.currentRoom.doors);
         
+        // Spawn rewards
         if (Math.random() < 0.10) {
              const cx = CONSTANTS.CANVAS_WIDTH / 2;
              const cy = CONSTANTS.CANVAS_HEIGHT / 2;
@@ -549,6 +565,7 @@ export class GameEngine {
 
         if (e.type === EntityType.ENEMY) {
             this.applyPhysics(e);
+            this.resolveWallCollision(e); // Allow enemies to move and collide with walls
         } else if (e.type !== EntityType.PROJECTILE && e.type !== EntityType.PEDESTAL) {
             e.x += e.velocity.x;
             e.y += e.velocity.y;
@@ -737,197 +754,172 @@ export class GameEngine {
                   const dir = normalizeVector({ x: this.player.x - e.x, y: this.player.y - e.y });
                   e.velocity = { x: dir.x * speed * 4, y: dir.y * speed * 4 }; 
               }
-          } else if (e.aiState === 'ATTACK') {
-              if (e.timer > 20) {
-                  e.aiState = 'IDLE';
-                  e.timer = 0;
+          }
+      }
+  }
+
+  // --- Implementation of missing physics methods ---
+
+  resolveWallCollision(ent: Entity) {
+      // 1. Apply Velocity in X
+      const oldX = ent.x;
+      ent.x += ent.velocity.x;
+      // 2. Check X Collision
+      if (this.checkCollision(ent)) {
+          ent.x = oldX; // Revert
+          ent.velocity.x = 0;
+      }
+
+      // 3. Apply Velocity in Y
+      const oldY = ent.y;
+      ent.y += ent.velocity.y;
+      // 4. Check Y Collision
+      if (this.checkCollision(ent)) {
+          ent.y = oldY; // Revert
+          ent.velocity.y = 0;
+      }
+  }
+
+  checkCollision(ent: Entity): boolean {
+      if (!this.currentRoom) return false;
+      const layout = this.currentRoom.layout;
+      const ts = CONSTANTS.TILE_SIZE;
+      
+      const startX = Math.floor(ent.x / ts);
+      const endX = Math.floor((ent.x + ent.w - 0.01) / ts);
+      const startY = Math.floor(ent.y / ts);
+      const endY = Math.floor((ent.y + ent.h - 0.01) / ts);
+      
+      for (let y = startY; y <= endY; y++) {
+          for (let x = startX; x <= endX; x++) {
+              // Out of bounds is solid
+              if (y < 0 || y >= layout.length || x < 0 || x >= layout[0].length) return true;
+              const tile = layout[y][x];
+              // 1 = Wall, 2 = Rock
+              if (tile === 1 || tile === 2) return true;
+          }
+      }
+
+      // Check against obstacles (Dynamic)
+      for (const e of this.entities) {
+          if (e.type === EntityType.OBSTACLE) {
+              if (checkAABB(ent, e)) return true;
+          }
+      }
+      return false;
+  }
+
+  checkWallCollision(ent: Entity): boolean {
+      return this.checkCollision(ent);
+  }
+
+  checkDoorCollisions() {
+      if (!this.currentRoom || !this.currentRoom.cleared) return;
+      const ts = CONSTANTS.TILE_SIZE;
+      const cx = this.player.x + this.player.w / 2;
+      const cy = this.player.y + this.player.h / 2;
+      
+      const tx = Math.floor(cx / ts);
+      const ty = Math.floor(cy / ts);
+      
+      if (ty < 0 || ty >= this.currentRoom.layout.length || tx < 0 || tx >= this.currentRoom.layout[0].length) return;
+      
+      const tile = this.currentRoom.layout[ty][tx];
+      if (tile === 3) {
+          // Determine Direction
+          let dir: Direction | null = null;
+          const h = this.currentRoom.layout.length;
+          const w = this.currentRoom.layout[0].length;
+          
+          if (ty === 0) dir = Direction.UP;
+          else if (ty === h - 1) dir = Direction.DOWN;
+          else if (tx === 0) dir = Direction.LEFT;
+          else if (tx === w - 1) dir = Direction.RIGHT;
+          
+          if (dir) {
+              const dx = dir === Direction.RIGHT ? 1 : dir === Direction.LEFT ? -1 : 0;
+              const dy = dir === Direction.DOWN ? 1 : dir === Direction.UP ? -1 : 0;
+              const nextRoom = this.dungeon.find(r => r.x === this.currentRoom!.x + dx && r.y === this.currentRoom!.y + dy);
+              if (nextRoom) {
+                  this.enterRoom(nextRoom, dir);
               }
-          }
-      }
-
-      this.resolveWallCollision(e);
-      
-      if (checkAABB(e, this.player)) {
-          const dir = normalizeVector({x: this.player.x - e.x, y: this.player.y - e.y});
-          this.damagePlayer(1, 15, dir);
-      }
-  }
-
-  damagePlayer(amount: number, knockbackForce: number = 0, knockbackDir: Vector2 = {x:0, y:0}) {
-      if (this.player.invincibleTimer > 0) return;
-      this.player.stats.hp -= amount;
-      this.player.invincibleTimer = 60;
-      this.player.flashTimer = 10;
-
-      this.player.knockbackVelocity.x += knockbackDir.x * knockbackForce;
-      this.player.knockbackVelocity.y += knockbackDir.y * knockbackForce;
-
-      if (this.player.stats.hp <= 0) {
-          this.status = GameStatus.GAME_OVER;
-      }
-  }
-
-  damageEnemy(e: EnemyEntity, amount: number, knockbackForce: number = 0, knockbackDir: Vector2 = {x:0, y:0}) {
-      e.hp -= amount;
-      e.flashTimer = 5;
-
-      let actualForce = knockbackForce;
-      if (e.enemyType === EnemyType.TANK) actualForce *= 0.2;
-      if (e.enemyType === EnemyType.BOSS) actualForce *= 0.1;
-
-      e.knockbackVelocity.x += knockbackDir.x * actualForce;
-      e.knockbackVelocity.y += knockbackDir.y * actualForce;
-      
-      if (e.hp <= 0) {
-          e.markedForDeletion = true;
-          this.score += 10;
-          const config = ENEMIES.find(cfg => cfg.type === e.enemyType) || BOSSES.find(cfg => cfg.type === e.enemyType);
-          if (config) {
-             this.score += (config.scoreValue - 10);
-          }
-          if (Math.random() < 0.05) {
-              this.spawnPickup(e.x + e.w/2, e.y + e.h/2);
           }
       }
   }
 
   collectItem(item: ItemEntity) {
+      if (item.markedForDeletion) return;
+      
+      const config = ITEMS.find(i => i.type === item.itemType) || DROPS.find(d => d.type === item.itemType);
+      if (!config) return;
+
       item.markedForDeletion = true;
-      if (item.itemType === ItemType.HEART_PICKUP) {
-          const config = DROPS.find(d => d.type === item.itemType);
-          if (config && config.stats.hp) {
-              this.player.stats.hp = Math.min(this.player.stats.hp + config.stats.hp, this.player.stats.maxHp);
-          }
-          this.notification = "PICKUP_HEART_DESC"; 
-          this.notificationTimer = 60;
-          return;
-      }
-
       if (item.choiceGroupId) {
-          this.entities.forEach(e => {
-              if (e.type === EntityType.ITEM && 
-                  (e as ItemEntity).choiceGroupId === item.choiceGroupId && 
-                  e.id !== item.id) {
-                  e.markedForDeletion = true;
-              }
-          });
+           this.entities.forEach(e => {
+               if (e.type === EntityType.ITEM && (e as ItemEntity).choiceGroupId === item.choiceGroupId) {
+                   e.markedForDeletion = true;
+               }
+           });
       }
 
-      this.player.inventory.push(item.itemType);
+      // Pickup vs Inventory
+      if (!config.isPickup) {
+          this.player.inventory.push(item.itemType);
+          this.notification = item.name;
+          this.notificationTimer = 120;
+      }
+
+      // Apply Stats
+      const s = config.stats;
+      const pStats = this.player.stats;
       
-      if (this.currentRoom) {
-          this.currentRoom.itemCollected = true;
-          if (this.currentRoom.type === 'ITEM') {
-               this.currentRoom.cleared = true;
-               carveDoors(this.currentRoom.layout, this.currentRoom.doors);
-          }
-      }
+      if (s.maxHp) { pStats.maxHp += s.maxHp; pStats.hp += s.maxHp; }
+      if (s.hp) { pStats.hp = Math.min(pStats.maxHp, pStats.hp + s.hp); }
+      if (s.speed) pStats.speed += s.speed;
+      if (s.damage) pStats.damage *= s.damage;
+      if (s.fireRate) pStats.fireRate *= s.fireRate;
+      if (s.shotSpeed) pStats.shotSpeed += s.shotSpeed;
+      if (s.range) pStats.range *= s.range;
+      if (s.bulletScale) pStats.bulletScale += s.bulletScale;
+      if (s.knockback) pStats.knockback *= s.knockback;
+      if (s.shotSpread) pStats.shotSpread = s.shotSpread;
 
-      this.notification = `${item.name}:${item.description}`;
-      this.notificationTimer = 180;
+      // Safe guards
+      if (pStats.maxHp < 1) pStats.maxHp = 1;
+      if (pStats.hp > pStats.maxHp) pStats.hp = pStats.maxHp;
+      if (pStats.fireRate < 5) pStats.fireRate = 5;
+  }
+
+  damageEnemy(enemy: EnemyEntity, damage: number, knockback: number, hitDir: Vector2) {
+      enemy.hp -= damage;
+      enemy.flashTimer = 5;
       
-      const config = ITEMS.find(i => i.type === item.itemType);
-      if (config) {
-          const s = this.player.stats;
-          const mods = config.stats;
-          if (mods.maxHp) { s.maxHp += mods.maxHp; s.hp = Math.min(s.hp + mods.maxHp, s.maxHp); }
-          if (mods.hp) { s.hp = Math.min(s.hp + mods.hp, s.maxHp); }
-          if (mods.damage) s.damage *= mods.damage;
-          if (mods.speed) s.speed += mods.speed;
-          if (mods.fireRate) s.fireRate = Math.max(5, s.fireRate * mods.fireRate);
-          if (mods.shotSpeed) s.shotSpeed += mods.shotSpeed;
-          if (mods.range) s.range *= mods.range;
-          if (mods.bulletScale) s.bulletScale += mods.bulletScale;
-          if (mods.knockback) s.knockback *= mods.knockback;
-          if (mods.shotSpread) s.shotSpread = mods.shotSpread;
+      if (enemy.enemyType !== EnemyType.BOSS) {
+          enemy.knockbackVelocity.x += hitDir.x * knockback * 8;
+          enemy.knockbackVelocity.y += hitDir.y * knockback * 8;
       }
-  }
-
-  resolveWallCollision(ent: Entity) {
-      const ts = CONSTANTS.TILE_SIZE;
-      const map = this.currentRoom!.layout;
-      const getFeetRect = (x: number, y: number): Rect => ({
-          x: x + 4, 
-          y: y + ent.h * 0.5, 
-          w: ent.w - 8,
-          h: ent.h * 0.5
-      });
-      const nextX = ent.x + ent.velocity.x;
-      const nextY = ent.y + ent.velocity.y;
-      const isFlying = (ent.type === EntityType.ENEMY) && (ent as EnemyEntity).flying;
-
-      const checkCollision = (rect: Rect) => {
-          const points = [
-              {x: rect.x, y: rect.y},
-              {x: rect.x + rect.w, y: rect.y},
-              {x: rect.x, y: rect.y + rect.h},
-              {x: rect.x + rect.w, y: rect.y + rect.h}
-          ];
-          for (const p of points) {
-              const c = Math.floor(p.x / ts);
-              const r = Math.floor(p.y / ts);
-              if (r < 0 || r >= map.length || c < 0 || c >= map[0].length) return true;
-              const tile = map[r][c];
-              if (tile === 1 || (!isFlying && tile === 2)) return true;
+      
+      if (enemy.hp <= 0) {
+          enemy.markedForDeletion = true;
+          this.score += 10 + (enemy.enemyType === EnemyType.BOSS ? 500 : 0);
+          
+          if (Math.random() < 0.05) {
+              this.spawnPickup(enemy.x + enemy.w/2, enemy.y + enemy.h/2);
           }
-          return false;
-      };
-
-      const feetX = getFeetRect(nextX, ent.y);
-      if (!checkCollision(feetX)) {
-          ent.x = nextX;
-      }
-      const feetY = getFeetRect(ent.x, nextY);
-      if (!checkCollision(feetY)) {
-          ent.y = nextY;
       }
   }
 
-  checkWallCollision(ent: Entity): boolean {
-      const ts = CONSTANTS.TILE_SIZE;
-      const map = this.currentRoom!.layout;
-      const c = Math.floor((ent.x + ent.w/2) / ts);
-      const r = Math.floor((ent.y + ent.h/2) / ts);
-      if (r < 0 || r >= map.length || c < 0 || c >= map[0].length) return true;
-      return (map[r][c] === 1 || map[r][c] === 2);
-  }
-
-  checkDoorCollisions() {
-      if (!this.currentRoom) return;
-      const p = this.player;
-      const w = CONSTANTS.CANVAS_WIDTH;
-      const h = CONSTANTS.CANVAS_HEIGHT;
-      const ts = CONSTANTS.TILE_SIZE;
-      const doors = this.currentRoom.doors;
-
-      let triggerDir: Direction | null = null;
-      let nextX = this.currentRoom.x;
-      let nextY = this.currentRoom.y;
-
-      const cx = w / 2;
-      const cy = h / 2;
-      const doorSpan = ts * 1.5; 
-      const pCx = p.x + p.w / 2;
-      const pCy = p.y + p.h / 2;
-
-      if (doors.UP && p.y < ts && Math.abs(pCx - cx) < doorSpan) { 
-          triggerDir = Direction.UP; nextY--; 
-      }
-      if (doors.DOWN && p.y > h - ts - p.h && Math.abs(pCx - cx) < doorSpan) { 
-          triggerDir = Direction.DOWN; nextY++; 
-      }
-      if (doors.LEFT && p.x < ts && Math.abs(pCy - cy) < doorSpan) { 
-          triggerDir = Direction.LEFT; nextX--; 
-      }
-      if (doors.RIGHT && p.x > w - ts - p.w && Math.abs(pCy - cy) < doorSpan) { 
-          triggerDir = Direction.RIGHT; nextX++; 
-      }
-
-      if (triggerDir) {
-          const nextRoom = this.dungeon.find(r => r.x === nextX && r.y === nextY);
-          if (nextRoom) {
-              this.enterRoom(nextRoom, triggerDir);
-          }
+  damagePlayer(damage: number, knockback: number, hitDir: Vector2) {
+      if (this.player.invincibleTimer > 0) return;
+      this.player.stats.hp -= damage;
+      this.player.invincibleTimer = 60;
+      this.player.flashTimer = 10;
+      
+      this.player.knockbackVelocity.x += hitDir.x * knockback * 4;
+      this.player.knockbackVelocity.y += hitDir.y * knockback * 4;
+      
+      if (this.player.stats.hp <= 0) {
+          this.status = GameStatus.GAME_OVER;
       }
   }
 }

@@ -123,6 +123,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     RESUME: "继续游戏",
     RESTART: "重新开始",
     RETURN_TO_MENU: "返回主页",
+    COPY_SEED: "复制种子",
     
     // Settings
     SETTING_TITLE: "设置",
@@ -216,6 +217,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     RESUME: "繼續遊戲",
     RESTART: "重新開始",
     RETURN_TO_MENU: "返回主頁",
+    COPY_SEED: "複製種子",
     
     SETTING_TITLE: "設置",
     SETTING_LANG: "語言",
@@ -305,6 +307,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     RESUME: "RESUME",
     RESTART: "RESTART",
     RETURN_TO_MENU: "Return to Menu",
+    COPY_SEED: "Copy Seed",
 
     SETTING_TITLE: "SETTINGS",
     SETTING_LANG: "Language",
@@ -394,6 +397,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     RESUME: "ПРОДОЛЖИТЬ",
     RESTART: "ЗАНОВО",
     RETURN_TO_MENU: "В Главное Меню",
+    COPY_SEED: "Скопировать сид",
 
     SETTING_TITLE: "НАСТРОЙКИ",
     SETTING_LANG: "Язык",
